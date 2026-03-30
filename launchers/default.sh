@@ -13,8 +13,15 @@ dt-launchfile-init
 # NOTE: Use `dt-exec COMMAND` to run the main process (blocking process)
 
 # launching app
-dt-exec echo "This is an empty launch script. Update it to launch your application."
+#dt-exec python3 -m "my_package.my_script"
+#dt-exec python3 -m "my_package.my_script2"
+#dt-exec python3 -m "my_package.ps_code"
+#dt-exec python3 -m "my_package.YETO"
 
+python3 -m "my_package.cam_subscriber" &
+python3 -m "my_package.pose_with_aruco" &
+python3 -m "my_package.pose_without_aruco" &
+dt-exec python3 -m "my_package.duckie_mover"
 
 # ----------------------------------------------------------------------------
 # YOUR CODE ABOVE THIS LINE

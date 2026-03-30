@@ -1,0 +1,27 @@
+normalde locaalde çalışırken aşağıdaki komutu kullan:
+
+build için:
+
+dts devel build -f
+
+çalıştırmak için:
+
+dts devel run
+
+
+duckiebotta çalışırken önce kontrol et:
+
+ping robotname.local
+
+çıktı varsa bağlantı tamam build ve run için:
+
+dts devel build -f -H robotname
+
+DOCKER_API_VERSION=1.40 dts devel run -H bear.local
+
+çünkü local docker 1.44 üstü versiyonda çalışırken duckiebot dockerı 1.44 altında çalışıyor.
+
+
+DOCKER_API_VERSION=1.40 dts devel build -f -H yenirobot.local --pull
+ yukarıdaki build çalışıyor dene
+ 
