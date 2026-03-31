@@ -16,8 +16,17 @@ class ArUcoLocalizationNode:
         self.vehicle = os.environ['VEHICLE_NAME']
 
         # -------- Publishers --------
-        self.cam_pub = rospy.Publisher(f"/{self.vehicle}/aruco/camera", CompressedImage, queue_size=1)
-        self.map_pub = rospy.Publisher(f"/{self.vehicle}/aruco/map", CompressedImage, queue_size=1)
+        self.cam_pub = rospy.Publisher(
+        f"/{self.vehicle}/aruco/camera_image",
+        Image,
+        queue_size=1
+        ) 
+
+        self.map_pub = rospy.Publisher(
+            f"/{self.vehicle}/aruco/map_image",
+            Image,
+            queue_size=1
+        )
         self.pose_pub = rospy.Publisher(f"/{self.vehicle}/aruco/pose", PoseStamped, queue_size=10)
         self.cmd_pub = rospy.Publisher(f"/{self.vehicle}/car_cmd_switch_node/cmd", Twist, queue_size=1)
 

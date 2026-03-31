@@ -4,9 +4,11 @@ import os
 import rospy
 import cv2
 import numpy as np
-from sensor_msgs.msg import CompressedImage
+
+from sensor_msgs.msg import Image, CompressedImage
 from geometry_msgs.msg import PoseStamped, Twist
 from duckietown_msgs.msg import WheelEncoderStamped
+from cv_bridge import CvBridge
 
 
 class ArUcoLocalizationNode:
@@ -15,19 +17,53 @@ class ArUcoLocalizationNode:
 
         self.vehicle = os.environ['VEHICLE_NAME']
 
+        # -------- Bridge --------
+        self.bridge = CvBridge()
+
         # -------- Publishers --------
-        self.cam_pub = rospy.Publisher(f"/{self.vehicle}/aruco/camera", CompressedImage, queue_size=1)
-        self.map_pub = rospy.Publisher(f"/{self.vehicle}/aruco/map", CompressedImage, queue_size=1)
-        self.pose_pub = rospy.Publisher(f"/{self.vehicle}/aruco/pose", PoseStamped, queue_size=10)
-        self.cmd_pub = rospy.Publisher(f"/{self.vehicle}/car_cmd_switch_node/cmd", Twist, queue_size=1)
+        self.cam_pub = rospy.Publisher(
+            f"/{self.vehicle}/aruco/camera_image",
+            Image,
+            queue_size=1
+        )
+
+        self.map_pub = rospy.Publisher(
+            f"/{self.vehicle}/aruco/map_image",
+            Image,
+            queue_size=1
+        )
+
+        self.pose_pub = rospy.Publisher(
+            f"/{self.vehicle}/aruco/pose",
+            PoseStamped,
+            queue_size=10
+        )
+
+        self.cmd_pub = rospy.Publisher(
+            f"/{self.vehicle}/car_cmd_switch_node/cmd",
+            Twist,
+            queue_size=1
+        )
 
         # -------- Subscribers --------
-        rospy.Subscriber(f"/{self.vehicle}/camera_node/image/compressed", CompressedImage, self.callback, queue_size=1)
+        rospy.Subscriber(
+            f"/{self.vehicle}/camera_node/image/compressed",
+            CompressedImage,
+            self.callback,
+            queue_size=1
+        )
 
-        rospy.Subscriber(f"/{self.vehicle}/left_wheel_encoder_node/tick",
-                         WheelEncoderStamped, self.left_cb)
-        rospy.Subscriber(f"/{self.vehicle}/right_wheel_encoder_node/tick",
-                         WheelEncoderStamped, self.right_cb)
+        rospy.Subscriber(
+            f"/{self.vehicle}/left_wheel_encoder_node/tick",
+            WheelEncoderStamped,
+            self.left_cb
+        )
+
+        rospy.Subscriber(
+            f"/{self.vehicle}/right_wheel_encoder_node/tick",
+            WheelEncoderStamped,
+            self.right_cb
+        )
 
         # -------- Encoder --------
         self.left_tick = 0
@@ -62,8 +98,11 @@ class ArUcoLocalizationNode:
         # -------- State --------
         self.origin = None
         self.pose = np.array([0.0, 0.0])
-        self.last_aruco_time = None
-        self.max_fallback_time = 2.0
+
+        # 🎯 control
+        self.target_visible = False
+        self.target_x = 0.0
+        self.target_z = 0.0
 
         self.path = []
 
@@ -73,7 +112,7 @@ class ArUcoLocalizationNode:
 
         rospy.Timer(rospy.Duration(0.1), self.move)
 
-        rospy.loginfo("🚀 REAL ODOM + ARUCO STARTED")
+        rospy.loginfo("🚀 SYSTEM READY (Image + Odom + Control)")
 
     # --------------------------
     def left_cb(self, msg):
@@ -108,16 +147,29 @@ class ArUcoLocalizationNode:
 
     # --------------------------
     def move(self, _):
+
         cmd = Twist()
-        cmd.linear.x = 0.2
+
+        if self.target_visible:
+            error = self.target_x
+            distance = self.target_z
+
+            k_angular = 2.0
+            cmd.angular.z = -k_angular * error
+
+            if distance > 0.25:
+                cmd.linear.x = 0.2
+            else:
+                cmd.linear.x = 0.0
+        else:
+            cmd.linear.x = 0.1
+            cmd.angular.z = 0.4
+
         self.cmd_pub.publish(cmd)
 
     # --------------------------
     def publish_image(self, img, pub):
-        msg = CompressedImage()
-        msg.header.stamp = rospy.Time.now()
-        msg.format = "jpeg"
-        msg.data = np.array(cv2.imencode(".jpg", img)[1]).tobytes()
+        msg = self.bridge.cv2_to_imgmsg(img, encoding="bgr8")
         pub.publish(msg)
 
     # --------------------------
@@ -144,12 +196,10 @@ class ArUcoLocalizationNode:
     # --------------------------
     def callback(self, msg):
 
-        # ---- ODOMETRY HER FRAME ----
+        # ---- ODOM ----
         odo = self.compute_odometry()
-
         if odo is not None:
             ds, dtheta = odo
-
             self.theta += dtheta
             self.pose[0] += ds * np.cos(self.theta)
             self.pose[1] += ds * np.sin(self.theta)
@@ -169,11 +219,8 @@ class ArUcoLocalizationNode:
 
         corners, ids, _ = cv2.aruco.detectMarkers(gray, self.dict, parameters=self.params)
 
-        tag_used = False
+        self.target_visible = False
 
-        # =====================
-        # ARUCO
-        # =====================
         if ids is not None:
 
             cv2.aruco.drawDetectedMarkers(display, corners, ids)
@@ -188,9 +235,14 @@ class ArUcoLocalizationNode:
                 if tag_id not in self.known_tags:
                     continue
 
-                tag_used = True
-
                 tvec = tvecs[i][0]
+
+                # 🎯 control
+                self.target_visible = True
+                self.target_x = tvec[0]
+                self.target_z = tvec[2]
+
+                # 📍 localization
                 world_x, world_y, _ = self.known_tags[tag_id]
 
                 robot_x = world_x - tvec[2]
@@ -204,16 +256,10 @@ class ArUcoLocalizationNode:
                     robot_y - self.origin[1]
                 ])
 
-                self.last_aruco_time = rospy.Time.now().to_sec()
-
                 rospy.loginfo(f"🟢 ARUCO → X:{self.pose[0]:.2f} Y:{self.pose[1]:.2f}")
 
                 break
-
-        # =====================
-        # FALLBACK LOG
-        # =====================
-        if not tag_used:
+        else:
             rospy.loginfo(f"🟡 ODOM → X:{self.pose[0]:.2f} Y:{self.pose[1]:.2f}")
 
         self.path.append(self.pose.copy())
